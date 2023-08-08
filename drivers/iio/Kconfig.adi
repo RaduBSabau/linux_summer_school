@@ -195,3 +195,4 @@ config IIO_ALL_ADI_DRIVERS
 	imply AD5110
 	imply MAX31865
 	imply AXI_PWM_LED
+	imply AD5592R_S

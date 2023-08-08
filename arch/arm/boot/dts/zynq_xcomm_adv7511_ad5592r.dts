@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0
+
+#include <zynq-zybo-z7.dts>
+
+&spi0 {
+    status = "okay";
+    ad5592r_s@0
+    {
+        reg = <0>;
+        compatible = "adi,ad5592r_s";
+        spi-max-frequency = <1000000>;
+
+    };
+};
