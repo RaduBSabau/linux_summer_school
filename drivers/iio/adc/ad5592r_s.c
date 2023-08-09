@@ -22,43 +22,34 @@ static int ad5592r_s_read_raw(struct iio_dev *indio_dev,
 		switch(chan->channel){
 			case 0:
 				*val = 0;
-				break;
+				return IIO_VAL_INT;
 			case 1:
 		 		*val = 1;
-				break;
+				return IIO_VAL_INT;
 			case 2:
 				*val = 2;
-				break;
+				return IIO_VAL_INT;
 			case 3:
 				*val = 3;
-				break;
+				return IIO_VAL_INT;
 			case 4:
 				*val = 4;
-				break;
+				return IIO_VAL_INT;
 			case 5:
 				*val = 5;
-				break;
-
+				return IIO_VAL_INT;
 			default :
-
 				*val = 100;
-				break;
+				return IIO_VAL_INT;
 		}
-
-		return IIO_VAL_INT;
-	
 	default :
 		return -EINVAL;
 	
 	}
 }
 
-static const struct iio_info adi_emu_info = {
-	.read_raw = &ad5592r_s_read_raw,
-};
-
 static const struct iio_info ad5592r_s_info = {
-
+	.read_raw = &ad5592r_s_read_raw,
 };
 
 static const struct iio_chan_spec ad5592r_s_channel[] = {
