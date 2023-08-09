@@ -49,8 +49,7 @@ static int ad5592r_s_read_raw(struct iio_dev *indio_dev,
 				*val = st->tmp_chan5;
 				return IIO_VAL_INT;
 			default :
-				*val = 100;
-				return IIO_VAL_INT;
+				return -EINVAL;
 		}
 	case IIO_CHAN_INFO_ENABLE:
 		*val = st->en;
@@ -91,6 +90,8 @@ static int ad5592r_s_write_raw(struct iio_dev *indio_dev,
 				case 5:
 					st->tmp_chan5 = val;
 					return 0;
+				default:
+					return -EINVAL;
 			}
 		case IIO_CHAN_INFO_ENABLE:
 			st->en = val;
