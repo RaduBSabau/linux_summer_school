@@ -14,6 +14,7 @@
 
 #define ADC_SEQ 0x2
 
+#define AD5592R_ADC_CONFIG 	BIT(13)
 #define AD5592R_RD_MASK 	BIT(15)
 #define AD5592R_RD_ADDR_MASK	GENMASK(14,11)
 #define AD5592R_RD_ADDR3_MASK	GENMASK(14,12)
@@ -189,9 +190,18 @@ static int ad5592r_s_write_raw(struct iio_dev *indio_dev,
 	}
 }
 
+static int ad5592r_s_adc_init(struct iio_dev *indio_dev)
+{
+	u16 reg = 0;
+	u16 writeval = 0;
+	reg |= AD5592R_ADC_CONFIG;
+
+	return ad5592r_s_reg_acces(indio_dev, reg, writeval,0);
+}
+
 static int ad5592r_s_reg_acces(struct iio_dev *indio_dev,
-			       unsigned reg, unsigned writeval,
-			       unsigned *readval)
+			       			   unsigned reg, unsigned writeval,
+			       			   unsigned *readval)
 {
 	struct ad5592r_s_state *st = iio_priv(indio_dev);
 
@@ -260,8 +270,8 @@ static int ad5592r_probe(struct spi_device *spi)
 
 	st = iio_priv(indio_dev);
 
-	//configurare ca adc
-
+	spi->mode = 3;
+	//spi->max_speed_hz = 1000000;
 	st->spi = spi;
 	st->en = 0;
 	st->tmp_chan0 = 0;
@@ -270,6 +280,16 @@ static int ad5592r_probe(struct spi_device *spi)
 	st->tmp_chan3 = 0;
 	st->tmp_chan4 = 0;
 	st->tmp_chan5 = 0;
+
+	
+	//ADC CONFIG
+
+	int ret;
+	ret = ad5592r_s_adc_init(indio_dev);
+	if(ret)
+		return ret;
+
+
 	
 	indio_dev->name = "ad5592r_s";
 	indio_dev->info = &ad5592r_s_info;
