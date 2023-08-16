@@ -17,6 +17,7 @@
 #define AD5592R_ADC_CONFIG 	BIT(13)
 #define AD5592R_RD_MASK 	BIT(15)
 #define AD5592R_RD_ADDR_MASK	GENMASK(14,11)
+#define AD5592R_RD_WR_MASK	GENMASK(10,0)
 #define AD5592R_RD_ADDR3_MASK	GENMASK(14,12)
 #define AD5592R_RD_ADC_MASK	GENMASK(11,0)
 #define ADI_EMU_ADDR_MASK	GENMASK(14,8)
@@ -62,8 +63,10 @@ static int ad5592r_s_read(struct ad5592r_s_state *st, u16 reg, u16 *val)
 
 	//prima secventa
 
-	msg |= FIELD_PREP(AD5592R_RD_ADDR_MASK, ADC_SEQ);
-	msg |= BIT(reg);
+	msg |= FIELD_PREP(AD5592R_WR_ADDR_MASK, ADC_SEQ);
+	msg |= FIELD_PREP(AD5592R_WR_VAL_MASK, reg);
+
+	dev_info(&st->spi->dev, "tx at read = 0x%x", msg);
 
 	put_unaligned_be16(msg, &tx);
 
@@ -79,10 +82,10 @@ static int ad5592r_s_read(struct ad5592r_s_state *st, u16 reg, u16 *val)
 
 	xfer[2].rx_buf = &rx;
 
-	rx &= AD5592R_RD_ADC_MASK;
+	rx |= AD5592R_RD_ADC_MASK;
+	rx |= AD5592R_RD_ADDR3_MASK;
 
 	ret = spi_sync_transfer(st->spi, xfer, 3);
-
 	if(ret)
 		return ret;
 	
@@ -102,6 +105,9 @@ static int ad5592r_s_write(struct ad5592r_s_state *st, u16 reg, u16 val)
 	};
 	msg |= FIELD_PREP(AD5592R_WR_ADDR_MASK, reg);
 	msg |= FIELD_PREP(AD5592R_WR_VAL_MASK, val);
+
+	dev_info(&st->spi->dev, "tx at read = 0x%x", msg);
+
 
 	put_unaligned_be16(msg, &tx);
 	xfer.tx_buf = &tx;
@@ -190,27 +196,29 @@ static int ad5592r_s_write_raw(struct iio_dev *indio_dev,
 	}
 }
 
-static int ad5592r_s_adc_init(struct iio_dev *indio_dev)
-{
-	u16 reg = 0;
-	u16 writeval = 0;
-	reg |= AD5592R_ADC_CONFIG;
 
-	return ad5592r_s_reg_acces(indio_dev, reg, writeval,0);
-}
 
 static int ad5592r_s_reg_acces(struct iio_dev *indio_dev,
-			       			   unsigned reg, unsigned writeval,
-			       			   unsigned *readval)
+			       	unsigned reg, unsigned writeval,
+			       	unsigned *readval)
 {
 	struct ad5592r_s_state *st = iio_priv(indio_dev);
 
 	if(readval)
 	{
-		return ad5592r_s_read(st, reg, (u8 *)readval);
+		return ad5592r_s_read(st, reg, (u16 *)readval);
 	}
 
 	return ad5592r_s_write(st, reg, writeval);
+}
+
+static int ad5592r_s_adc_init(struct iio_dev *indio_dev)
+{
+	u16 reg = 0;
+	u16 writeval = 63;
+	reg |= AD5592R_ADC_CONFIG;
+
+	return ad5592r_s_reg_acces(indio_dev, reg, writeval, 0);
 }
 
 static const struct iio_info ad5592r_s_info = {
