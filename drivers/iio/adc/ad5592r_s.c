@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * ADI ADC Emulated driver
+ * Analog Devices AD5592R SPI ADC driver
  *
  * Copyright (C) 2023 Analog Devices, Inc.
  */
