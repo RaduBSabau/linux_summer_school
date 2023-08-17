@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 
-#include "zynq-zybo-z7.dts"
+#include "zynq-zybo-z7-axi-pwm-led.dts"
 
 &spi0 {
     status = "okay";
@@ -12,3 +12,4 @@
         spi-cpol;
     };
 };
+

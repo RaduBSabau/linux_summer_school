@@ -6,29 +6,36 @@
  */
 
 #include <linux/module.h>
+#include <linux/delay.h>
 #include <linux/spi/spi.h>
 #include <linux/iio/iio.h>
 
 #include <asm/unaligned.h>
 #include <linux/bitfield.h>
 
-#define AD5592R_REG_READBACK	0x7
-#define AD5592R_RDB_MASK_EN	BIT(6)
-#define AD5592R_RDB_MASK_REG	GENMASK(5,2)
+#define AD5592R_REG_READBACK		0x7
+#define AD5592R_RDB_MASK_EN		BIT(6)
+#define AD5592R_RDB_MASK_REG		GENMASK(5,2)
 
-#define AD5592R_ADDR_MASK	GENMASK(14,11)
-#define AD5592R_VAL_MASK	GENMASK(10,0)
+#define AD5592R_REG_SW_RST		0xF
+#define AD5592R_MASK_RST		0x5AC
 
+#define AD5592R_REG_CNVST		0x2
+#define AD5592R_ADC_CHAN(x)		BIT(x)
+#define AD5592R_ADC_ADDR_MASK		GENMASK(14,12)
+#define AD5592R_ADC_VAL_MASK		GENMASK(11,0)
+
+#define AD5592R_ADDR_MASK		GENMASK(14,11)
+#define AD5592R_VAL_MASK		GENMASK(10,0)
+
+#define AD5592R_INIT_ADDR_VAL		0x4
+#define AD5592R_INIT_CONF_MASK		GENMASK(5,0)
+
+#define AD5592R_REG_REF_CONF		0xB
+#define AD5592R_MASK_REF_EN		BIT(9)
 
 struct ad5592r_state{
 	bool en;
-	u16 tmp_chan0;
-	u16 tmp_chan1;
-	u16 tmp_chan2;
-	u16 tmp_chan3;
-	u16 tmp_chan4;
-	u16 tmp_chan5;
-
 	struct spi_device *spi;
 };
 
@@ -103,6 +110,65 @@ static int ad5592r_spi_write(struct ad5592r_state *st, u16 reg, u16 val)
 	return spi_sync_transfer(st->spi, &xfer, 1);
 }
 
+static int ad5592r_read_adc(struct ad5592r_state *st, u8 chan, int *val)
+{
+	u16 tx = 0;
+	u16 rx = 0;
+	u16 msg = 0;
+	u16 tmp;
+	u16 addr;
+	int ret;
+
+	struct spi_transfer xfer = {
+		.tx_buf = &tx,
+		.len = 2,
+	};
+
+	msg |= FIELD_PREP(AD5592R_ADDR_MASK, AD5592R_REG_CNVST);
+	msg |= AD5592R_ADC_CHAN(chan);
+
+	put_unaligned_be16(msg, &tx);
+	
+	ret = spi_sync_transfer(st->spi, &xfer, 1);
+	if(ret)
+	{
+		dev_err(&st->spi->dev, "Failed at CNVST");
+		return ret;
+	}
+
+	ret = ad5592r_spi_nop(st, NULL);
+	if(ret)
+	{
+		dev_err(&st->spi->dev, "Failed at SPI WR NOP transfer");
+		return ret;
+	}
+
+	ret = ad5592r_spi_nop(st, &rx);
+	if(ret)
+	{
+		dev_err(&st->spi->dev, "Failed at Data Read");
+		return ret;
+	}
+
+	tmp = get_unaligned_be16(&rx);
+
+	addr = tmp;
+	addr &= AD5592R_ADC_ADDR_MASK;
+	addr = (addr >> 12);
+
+	dev_info(&st->spi->dev, "req chan = 0x%x; recv chan = 0x%x",chan, addr);
+
+	if(addr != chan) {
+		dev_err(&st->spi->dev,
+		 "Requested channel doesn't match read channel");
+		return -EINVAL;
+	}
+
+	tmp &= AD5592R_ADC_VAL_MASK;
+	*val = tmp;
+
+	return 0;
+}
 
 static int ad5592r_write_raw(struct iio_dev *indio_dev,
 			     struct iio_chan_spec const *chan,
@@ -111,40 +177,14 @@ static int ad5592r_write_raw(struct iio_dev *indio_dev,
 			     long mask)
 {
 	struct ad5592r_state *st = iio_priv(indio_dev);	
+	int ret;
+	
 	switch (mask)
 	{
-		case IIO_CHAN_INFO_RAW:
-			switch (chan->channel)
-			{
-				case 0:
-					st->tmp_chan0 = val;
-					break;
-				case 1:
-					st->tmp_chan1 = val;
-					break;
-
-				case 2:
-					st->tmp_chan2 = val;
-					break;
-
-				case 3:
-					st->tmp_chan3 = val;
-					break;
-
-				case 4:
-					st->tmp_chan4 = val;
-					break;
-
-				case 5:
-					st->tmp_chan5 = val;
-					break;
-				default:
-					return -EINVAL;
-			}
-			return 0;
 		case IIO_CHAN_INFO_ENABLE:
 			st->en = val;
 			return 0;
+			
 		default:
 			return -EINVAL;
 	}
@@ -157,35 +197,17 @@ static int ad5592r_read_raw(struct iio_dev *indio_dev,
 			long mask)
 {
 	struct ad5592r_state *st = iio_priv(indio_dev);
+	int ret;
 	switch(mask){
 		case IIO_CHAN_INFO_RAW:
-			switch (chan->channel)
-			{
-				case 0:
-					*val = st->tmp_chan0;
-					break;
-				case 1:
-					*val = st->tmp_chan1;
-					break;
-
-				case 2:
-					*val = st->tmp_chan2;
-					break;
-
-				case 3:
-					*val = st->tmp_chan3;
-					break;
-
-				case 4:
-					*val = st->tmp_chan4;
-					break;
-
-				case 5:
-					*val = st->tmp_chan5;
-					break;
-				
-				default:
-					return -EINVAL;
+			ret = ad5592r_read_adc(st,
+					       chan->channel,
+					       val);
+			if(ret){
+				dev_err(&st->spi->dev, 
+					"Error at read adc %d", 
+					chan->channel);
+				return ret;
 			}
 			return IIO_VAL_INT;
 
@@ -212,13 +234,47 @@ static int ad5592r_reg_access(struct iio_dev *indio_dev,
 	return ad5592r_spi_write(st, reg, writeval);
 }
 
-static int ad5592r_adc_init(struct iio_dev *indio_dev, // return by iio 
-			        unsigned int reg,
-			        unsigned int writeval)
+static int ad5592r_adc_init(struct iio_dev *indio_dev)
 {
 	struct ad5592r_state *st = iio_priv(indio_dev);
-	return ad5592r_spi_write(st, reg, writeval);
+	int ret;
+
+	ret = ad5592r_spi_write(st, AD5592R_REG_SW_RST, AD5592R_MASK_RST);
+	
+	if(ret) {
+		dev_err(&st->spi->dev, "Failed at RST.");
+		return ret;
+	}
+
+	usleep_range(250, 300);
+
+	ret = ad5592r_spi_write(st, AD5592R_INIT_ADDR_VAL,
+				AD5592R_INIT_CONF_MASK);
+	if(ret)
+	{
+		dev_err(&st->spi->dev, "Failed at ADC Init");
+		return ret;
+	}
+
+	ret = ad5592r_spi_write(st, AD5592R_REG_REF_CONF,
+				AD5592R_MASK_REF_EN);
+	if(ret) {
+		dev_err(&st->spi->dev, "Failed at VREF enable.");
+		return ret;
+	}
+
+	return 0;
 }
+
+// static int ad5592r_reset()
+// {
+// 	return 0;
+// }
+
+// static int ad5592r_shutdown()
+// {
+// 	return 0;
+// }
 
 static const struct iio_info ad5592r_s_info = {
 	.read_raw = &ad5592r_read_raw,
@@ -279,25 +335,20 @@ static int ad5592r_probe(struct spi_device *spi)
 	st = iio_priv(indio_dev);
 
 	//spi->mode = 3;
-
 	st->spi = spi;
 	st->en = 0;
-	st->tmp_chan0 = 0;
-	st->tmp_chan1 = 0;
-	st->tmp_chan2 = 0;
-	st->tmp_chan3 = 0;
-	st->tmp_chan4 = 0;
-	st->tmp_chan5 = 0;
-
-	// int ret;
-	// ret = ad5592r_adc_init(indio_dev, ADC_CONFIG, ADI_ADC_EN_MASK);
-	// if(ret)
-	// 	return ret;
 	
 	indio_dev->name = "ad5592r_s";
 	indio_dev->info = &ad5592r_s_info;
 	indio_dev->channels = ad5592r_channel;
 	indio_dev->num_channels = ARRAY_SIZE(ad5592r_channel);
+
+	int ret;
+	ret = ad5592r_adc_init(indio_dev);
+	if(ret) {
+		dev_err(&spi->dev, "Failed at init");
+		return ret;
+	}
 
 	return devm_iio_device_register(&spi->dev, indio_dev);
 }
@@ -311,6 +362,6 @@ static struct spi_driver ad5592r_driver = {
 
 module_spi_driver (ad5592r_driver);
 
-MODULE_AUTHOR("Radu bogdan Sabau <Radu.Sabau@analog.com");
+MODULE_AUTHOR("Radu bogdan Sabau <Radu.Sabau@analog.com>");
 MODULE_DESCRIPTION("Analog Devices AD5592R ADC Driver");
 MODULE_LICENSE("GPL v2");
