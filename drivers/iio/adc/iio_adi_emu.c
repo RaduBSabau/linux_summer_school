@@ -10,7 +10,10 @@
 #include <linux/module.h>
 #include <linux/spi/spi.h>
 
+#include <linux/iio/buffer.h>
 #include <linux/iio/iio.h>
+#include <linux/iio/triggered_buffer.h>
+#include <linux/iio/trigger_consumer.h>
 
 #define ADI_EMU_REG_DEVICE_CFG		0x2
 #define  ADI_EMU_MASK_PWD		BIT(5)
@@ -179,6 +182,60 @@ static int adi_emu_write_raw(struct iio_dev *indio_dev,
 	}
 }
 
+static irqreturn_t adi_emu_trigger_handler(int irq, void *p)
+{
+	struct iio_poll_func *pf = p;
+	struct iio_dev *indio_dev = pf->indio_dev;
+	struct adi_emu_state *st = iio_priv(indio_dev);
+	u16 buff[2];
+	u8 i = 0;
+	u8 high;
+	u8 low;
+	int ret;
+
+	ret = adi_emu_spi_write(st, ADI_EMU_REG_CNVST, ADI_EMU_MASK_CNVST);
+	if (ret) {
+		dev_err(&st->spi->dev, "Error at conversion");
+		return ret;
+	}
+
+	if (*indio_dev->active_scan_mask & BIT(0)) {
+		ret = adi_emu_spi_read(st, ADI_EMU_REG_CH0_DATA_HIGH, &high);
+		if (ret) {
+			dev_err(&st->spi->dev, "Error at ch0 high read");
+			return ret;
+		}
+
+		ret = adi_emu_spi_read(st, ADI_EMU_REG_CH0_DATA_LOW, &low);
+		if (ret) {
+			dev_err(&st->spi->dev, "Error at ch0 low read");
+			return ret;
+		}
+		buff[i] = (high << 8) | low;
+		i++;
+	}
+
+	if (*indio_dev->active_scan_mask & BIT(1)) {
+		ret = adi_emu_spi_read(st, ADI_EMU_REG_CH1_DATA_HIGH, &high);
+		if (ret) {
+			dev_err(&st->spi->dev, "Error at ch0 high read");
+			return ret;
+		}
+
+		ret = adi_emu_spi_read(st, ADI_EMU_REG_CH1_DATA_LOW, &low);
+		if (ret) {
+			dev_err(&st->spi->dev, "Error at ch0 low read");
+			return ret;
+		}
+		buff[i] = (high << 8) | low;
+	}
+
+	iio_push_to_buffers(indio_dev, buff);
+	iio_trigger_notify_done(indio_dev->trig);
+
+	return IRQ_HANDLED;
+}
+
 static int adi_emu_reg_access(struct iio_dev *indio_dev,
 			      unsigned reg, unsigned writeval,
 			      unsigned *readval)
@@ -204,6 +261,14 @@ static const struct iio_chan_spec adi_emu_channel[] = {
 		.indexed = 1,
 		.info_mask_separate = BIT(IIO_CHAN_INFO_RAW),
 		.info_mask_shared_by_all = BIT(IIO_CHAN_INFO_ENABLE),
+		.scan_index = 0,
+		.scan_type = {
+			.sign = 'u',
+			.storagebits = 16,
+			.realbits = 12,
+			.shift = 0,
+			.endianness = IIO_LE,
+		},
 	},
 	{
 		.type = IIO_VOLTAGE,
@@ -211,6 +276,14 @@ static const struct iio_chan_spec adi_emu_channel[] = {
 		.indexed = 1,
 		.info_mask_separate = BIT(IIO_CHAN_INFO_RAW),
 		.info_mask_shared_by_all = BIT(IIO_CHAN_INFO_ENABLE),
+		.scan_index = 1,
+		.scan_type = {
+			.sign = 'u',
+			.storagebits = 16,
+			.realbits = 12,
+			.shift = 0,
+			.endianness = IIO_LE,
+		},
 	},
 };
 
@@ -218,6 +291,7 @@ static int adi_emu_probe(struct spi_device *spi)
 {
 	struct iio_dev *indio_dev;
 	struct adi_emu_state *st;
+	int ret;
 
 	indio_dev = devm_iio_device_alloc(&spi->dev, sizeof(*st));
 	if (!indio_dev)
@@ -231,6 +305,11 @@ static int adi_emu_probe(struct spi_device *spi)
 	indio_dev->info = &adi_emu_info;
 	indio_dev->channels = adi_emu_channel;
 	indio_dev->num_channels = ARRAY_SIZE(adi_emu_channel);
+
+	ret = devm_iio_triggered_buffer_setup(&spi->dev, indio_dev, NULL,
+					      &adi_emu_trigger_handler, NULL);
+	if (ret)
+		return ret;
 
 	return devm_iio_device_register(&spi->dev,indio_dev);
 }
