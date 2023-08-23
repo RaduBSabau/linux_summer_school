@@ -2,6 +2,7 @@
 
 #include "zynq-zybo-z7-axi-pwm-led.dts"
 
+
 &spi0 {
     status = "okay";
     ad5592r_s@0
